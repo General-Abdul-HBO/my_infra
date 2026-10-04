@@ -1,0 +1,15 @@
+# Grafana data source for Amazon CloudWatch (metrics + logs).
+# Prometheus and Alertmanager data sources are added by kube-prometheus-stack.
+#
+# authType "default" = use the AWS SDK credential chain, which picks up the
+# EKS Pod Identity credentials for the "grafana" service account. No keys here.
+apiVersion: 1
+datasources:
+  - name: CloudWatch
+    type: cloudwatch
+    uid: cloudwatch
+    access: proxy
+    editable: false
+    jsonData:
+      authType: default
+      defaultRegion: us-east-1

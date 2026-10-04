@@ -1,0 +1,25 @@
+# Scale between 2 and 6 pods to keep average CPU around 70% of the requested
+# CPU (250m). Needs metrics-server (installed by ArgoCD in kube-system).
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: example-app
+  labels:
+    app.kubernetes.io/name: example-app
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: example-app
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300 # wait 5 min before removing pods

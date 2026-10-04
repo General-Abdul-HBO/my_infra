@@ -1,0 +1,32 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: {{ argocd_namespace }}
+  # Deleting this Application deletes every child Application (and what they
+  # deployed). See the teardown section of the deployment guide for the order.
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: {{ gitops_repo_url }}
+    targetRevision: {{ gitops_target_revision }}
+    path: infra/kubernetes/apps
+    helm:
+      # Cluster-specific values flow from Terraform -> Ansible -> here, so
+      # nothing account-specific has to be committed to Git.
+      valuesObject:
+        repoURL: {{ gitops_repo_url }}
+        targetRevision: {{ gitops_target_revision }}
+        cluster:
+          name: {{ cluster_name }}
+          region: {{ cluster_region }}
+          vpcId: {{ cluster_vpc_id }}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: {{ argocd_namespace }}
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

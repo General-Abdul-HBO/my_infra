@@ -1,0 +1,47 @@
+# Alert rules owned by the app team. Prometheus evaluates them; firing alerts
+# show up in Prometheus (Alerts tab) and Alertmanager.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: example-app
+  labels:
+    app.kubernetes.io/name: example-app
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  groups:
+    - name: example-app
+      rules:
+        - alert: ExampleAppDown
+          expr: sum(up{namespace="example-app", job="example-app"}) == 0 or absent(up{namespace="example-app", job="example-app"})
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: example-app has no healthy pods being scraped
+            description: Prometheus has not been able to scrape any example-app pod for 2 minutes.
+
+        - alert: ExampleAppHighErrorRate
+          expr: |
+            sum(rate(http_server_requests_seconds_count{namespace="example-app", status=~"5.."}[5m]))
+              /
+            sum(rate(http_server_requests_seconds_count{namespace="example-app"}[5m]))
+              > 0.05
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: example-app 5xx error rate above 5%
+            description: "{{ $value | humanizePercentage }} of requests are failing."
+
+        - alert: ExampleAppHighLatency
+          expr: |
+            histogram_quantile(0.95,
+              sum by (le) (rate(http_server_requests_seconds_bucket{namespace="example-app", uri!~"/actuator.*|/livez|/readyz"}[5m]))
+            ) > 0.5
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: example-app p95 latency above 500ms
+            description: "p95 latency is {{ $value | humanizeDuration }}."

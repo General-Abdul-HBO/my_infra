@@ -1,0 +1,21 @@
+# Tells the Prometheus Operator: scrape /actuator/prometheus on the
+# "management" port of every pod behind the example-app Service, every 30s.
+# This object IS the app's Prometheus scrape config.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: example-app
+  labels:
+    app.kubernetes.io/name: example-app
+  annotations:
+    # The CRD comes from kube-prometheus-stack; on a brand-new cluster let
+    # ArgoCD retry instead of failing the dry run if it isn't there yet.
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: example-app
+  endpoints:
+    - port: management
+      path: /actuator/prometheus
+      interval: 30s

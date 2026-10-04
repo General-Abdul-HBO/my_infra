@@ -1,0 +1,7 @@
+# The only "host" is your own machine: the ArgoCD bootstrap talks to AWS and
+# the Kubernetes API from here, so nothing is installed on remote servers.
+all:
+  hosts:
+    localhost:
+      ansible_connection: local
+      ansible_python_interpreter: "{{ ansible_playbook_python }}"

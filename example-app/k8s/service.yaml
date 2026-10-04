@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: example-app
+  labels:
+    app.kubernetes.io/name: example-app
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: example-app
+  ports:
+    - name: http # app traffic - the Ingress/ALB targets this
+      port: 80
+      targetPort: http
+    - name: management # actuator - Prometheus scrapes this (servicemonitor.yaml)
+      port: 8081
+      targetPort: management

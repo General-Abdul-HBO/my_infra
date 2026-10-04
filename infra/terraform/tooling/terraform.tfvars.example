@@ -1,0 +1,4 @@
+# Copy to terraform.tfvars (git-ignored) if you want to change defaults.
+
+# ecr_repositories = ["example-app"]
+# ecr_force_delete = true

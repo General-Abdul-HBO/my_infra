@@ -1,0 +1,20 @@
+# Wave -5: default StorageClass (gp3) - Prometheus/Alertmanager PVCs need it.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-storage
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: platform
+  source:
+    repoURL: {{ .Values.repoURL }}
+    targetRevision: {{ .Values.targetRevision }}
+    path: infra/kubernetes/platform/storage
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    {{- toYaml .Values.syncPolicy | nindent 4 }}

@@ -1,0 +1,36 @@
+# ArgoCD renders this folder with Kustomize (example-app Application).
+#
+# DEPLOYING A NEW VERSION = changing newTag below and pushing to Git.
+# ArgoCD notices the commit and rolls the Deployment. Later the CI pipeline
+# will make this edit for you (`kustomize edit set image ...`).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: example-app
+
+labels:
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/part-of: devops-lab
+
+resources:
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+  - hpa.yaml
+  - pdb.yaml
+  - servicemonitor.yaml
+  - prometheusrule.yaml
+
+# Builds a ConfigMap named example-app-config-<hash of contents>. Changing a
+# value changes the name, which changes the Deployment, which triggers a
+# rolling restart - so pods always run with the config that's in Git.
+configMapGenerator:
+  - name: example-app-config
+    envs:
+      - configmap.env
+
+images:
+  - name: example-app
+    # Replace ACCOUNT_ID with your AWS account ID (terraform output ecr_registry)
+    newName: ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/example-app
+    newTag: "0.1.0"

@@ -1,0 +1,40 @@
+# The AWS Load Balancer Controller turns this into an internet-facing
+# Application Load Balancer in the PUBLIC subnets, forwarding straight to the
+# pod IPs in the PRIVATE subnets (target-type ip).
+#
+# Find its address:  kubectl get ingress -n example-app
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: example-app
+  labels:
+    app.kubernetes.io/name: example-app
+  annotations:
+    alb.ingress.kubernetes.io/load-balancer-name: example-app
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+    alb.ingress.kubernetes.io/healthcheck-path: /readyz
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "10"
+    alb.ingress.kubernetes.io/healthy-threshold-count: "2"
+    alb.ingress.kubernetes.io/target-group-attributes: deregistration_delay.timeout_seconds=30
+    alb.ingress.kubernetes.io/tags: Project=devops-lab,ManagedBy=aws-load-balancer-controller
+    # Lock the ALB down to your own IP while experimenting (recommended):
+    # alb.ingress.kubernetes.io/inbound-cidrs: 203.0.113.10/32
+    #
+    # HTTPS, once you have a domain + ACM certificate:
+    # alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    # alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:ACCOUNT_ID:certificate/...
+    # alb.ingress.kubernetes.io/ssl-redirect: "443"
+spec:
+  ingressClassName: alb
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: example-app
+                port:
+                  name: http

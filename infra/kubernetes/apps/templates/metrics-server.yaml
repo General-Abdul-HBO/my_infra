@@ -1,0 +1,27 @@
+# Wave -4: metrics-server - CPU/memory metrics for `kubectl top` and the
+# HorizontalPodAutoscaler.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: metrics-server
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-4"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: platform
+  source:
+    repoURL: https://kubernetes-sigs.github.io/metrics-server
+    chart: metrics-server
+    targetRevision: {{ .Values.versions.metricsServer }}
+    helm:
+      valuesObject:
+        resources:
+          requests: { cpu: 50m, memory: 64Mi }
+          limits: { memory: 128Mi }
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    {{- toYaml .Values.syncPolicy | nindent 4 }}

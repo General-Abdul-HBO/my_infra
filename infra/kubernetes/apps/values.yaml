@@ -1,0 +1,27 @@
+# Defaults. repoURL, targetRevision and cluster.* are overridden by the root
+# Application that infra/ansible/argocd-bootstrap.yml creates.
+repoURL: ""
+targetRevision: main
+
+cluster:
+  name: ""
+  region: ""
+  vpcId: ""
+
+# Pinned chart versions - upgrade by changing a number here and pushing.
+versions:
+  awsLoadBalancerController: 3.5.0
+  metricsServer: 3.14.0
+  kubePrometheusStack: 91.9.0
+
+# Sync behaviour shared by every child Application.
+syncPolicy:
+  automated:
+    prune: true # delete resources removed from Git
+    selfHeal: true # undo manual kubectl changes
+  retry:
+    limit: 10
+    backoff:
+      duration: 15s
+      factor: 2
+      maxDuration: 5m

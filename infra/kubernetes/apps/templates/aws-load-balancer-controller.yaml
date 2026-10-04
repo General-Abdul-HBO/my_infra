@@ -1,0 +1,38 @@
+# Wave -4: AWS Load Balancer Controller - turns Ingress objects into ALBs.
+# Its IAM role comes from EKS Pod Identity (infra/terraform/eks/pod_identity.tf),
+# matched on namespace kube-system + service account aws-load-balancer-controller.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: aws-load-balancer-controller
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-4"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: platform
+  source:
+    repoURL: https://aws.github.io/eks-charts
+    chart: aws-load-balancer-controller
+    targetRevision: {{ .Values.versions.awsLoadBalancerController }}
+    helm:
+      valuesObject:
+        clusterName: {{ .Values.cluster.name }}
+        # Set explicitly so the controller never needs the EC2 metadata service.
+        region: {{ .Values.cluster.region }}
+        vpcId: {{ .Values.cluster.vpcId }}
+        replicaCount: 2
+        serviceAccount:
+          create: true
+          name: aws-load-balancer-controller
+        # Leave `type: LoadBalancer` Services alone unless they opt in.
+        enableServiceMutatorWebhook: false
+        resources:
+          requests: { cpu: 50m, memory: 128Mi }
+          limits: { memory: 256Mi }
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    {{- toYaml .Values.syncPolicy | nindent 4 }}

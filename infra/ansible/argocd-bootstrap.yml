@@ -1,0 +1,132 @@
+# One-time GitOps bootstrap. After this, ArgoCD installs and updates
+# everything else in the cluster from Git - you stop running kubectl/helm.
+#
+#   ansible-playbook argocd-bootstrap.yml
+#
+# Safe to re-run (e.g. to upgrade ArgoCD after bumping argocd_chart_version).
+- name: Bootstrap ArgoCD on the EKS cluster
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - vars/gitops.yml
+
+  vars:
+    tf_eks_dir: "{{ playbook_dir }}/../terraform/eks"
+    argocd_values_file: "{{ playbook_dir }}/../kubernetes/argocd/values.yaml"
+
+  tasks:
+    - name: Make sure the GitOps repo URL was set
+      ansible.builtin.assert:
+        that: "'CHANGE-ME' not in gitops_repo_url"
+        fail_msg: "Edit infra/ansible/vars/gitops.yml and set gitops_repo_url to your GitHub repo."
+
+    # Single source of truth: read cluster facts from Terraform instead of
+    # copy-pasting IDs into config files.
+    - name: Read outputs from the EKS Terraform stack
+      ansible.builtin.command:
+        argv: [terraform, "-chdir={{ tf_eks_dir }}", output, -json]
+      register: tf_eks
+      changed_when: false
+
+    - name: Extract cluster facts
+      ansible.builtin.set_fact:
+        cluster_name: "{{ (tf_eks.stdout | from_json).cluster_name.value }}"
+        cluster_region: "{{ (tf_eks.stdout | from_json).region.value }}"
+        cluster_vpc_id: "{{ (tf_eks.stdout | from_json).vpc_id.value }}"
+
+    - name: Point kubectl at the cluster (context name = cluster name)
+      ansible.builtin.command:
+        argv:
+          - aws
+          - eks
+          - update-kubeconfig
+          - --region={{ cluster_region }}
+          - --name={{ cluster_name }}
+          - --alias={{ cluster_name }}
+      changed_when: false
+
+    - name: Add the Argo Helm repository
+      kubernetes.core.helm_repository:
+        name: argo
+        repo_url: https://argoproj.github.io/argo-helm
+
+    - name: Install / upgrade ArgoCD
+      kubernetes.core.helm:
+        name: argocd
+        chart_ref: argo/argo-cd
+        chart_version: "{{ argocd_chart_version }}"
+        release_namespace: "{{ argocd_namespace }}"
+        create_namespace: true
+        values_files:
+          - "{{ argocd_values_file }}"
+        kube_context: "{{ cluster_name }}"
+        update_repo_cache: true
+        wait: true
+        wait_timeout: 10m
+
+    # --- Secrets that must NOT live in Git -----------------------------------
+    # (Production upgrade: External Secrets Operator + AWS Secrets Manager.)
+    - name: Create the monitoring namespace
+      kubernetes.core.k8s:
+        context: "{{ cluster_name }}"
+        api_version: v1
+        kind: Namespace
+        name: monitoring
+        state: present
+
+    - name: Create the Grafana admin secret
+      kubernetes.core.k8s:
+        context: "{{ cluster_name }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: grafana-admin
+            namespace: monitoring
+          type: Opaque
+          stringData:
+            admin-user: admin
+            # Generated on first run, then re-read from the same file.
+            admin-password: "{{ lookup('ansible.builtin.password', grafana_admin_password_file, length=24, chars=['ascii_letters', 'digits']) }}"
+      no_log: true
+
+    - name: Register the private Git repository with ArgoCD
+      kubernetes.core.k8s:
+        context: "{{ cluster_name }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: gitops-repo
+            namespace: "{{ argocd_namespace }}"
+            labels:
+              argocd.argoproj.io/secret-type: repository
+          stringData:
+            type: git
+            url: "{{ gitops_repo_url }}"
+            username: "{{ gitops_repo_username }}"
+            password: "{{ gitops_repo_token }}"
+      when: gitops_repo_token | length > 0
+      no_log: true
+
+    # --- Hand over to GitOps -------------------------------------------------
+    # The "root" app points at infra/kubernetes/apps, a small Helm chart whose
+    # only job is to create the other ArgoCD Applications (app-of-apps).
+    - name: Create the root Application (app-of-apps)
+      kubernetes.core.k8s:
+        context: "{{ cluster_name }}"
+        state: present
+        definition: "{{ lookup('ansible.builtin.template', 'templates/root-app.yaml.j2') | from_yaml }}"
+
+    - name: Next steps
+      ansible.builtin.debug:
+        msg:
+          - "ArgoCD is installed and now syncing from {{ gitops_repo_url }} ({{ gitops_target_revision }})."
+          - "Watch it:      kubectl get applications -n {{ argocd_namespace }} -w"
+          - "UI:            kubectl port-forward -n {{ argocd_namespace }} svc/argocd-server 8080:443  ->  https://localhost:8080"
+          - "Admin password: kubectl -n {{ argocd_namespace }} get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d"
+          - "Grafana password is stored in {{ grafana_admin_password_file }}"

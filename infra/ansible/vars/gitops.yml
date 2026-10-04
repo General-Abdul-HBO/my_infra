@@ -1,0 +1,17 @@
+# The Git repository ArgoCD watches. Push this whole repo (my_infra) to GitHub
+# and put its HTTPS clone URL here.
+gitops_repo_url: "https://github.com/CHANGE-ME/my_infra.git"
+gitops_target_revision: main
+
+# PRIVATE repo only: create a GitHub fine-grained token with read-only
+# "Contents" access to this one repo, then before running the playbook:
+#   export GITOPS_REPO_TOKEN=github_pat_xxx
+# Leave unset for a public repo.
+gitops_repo_username: git
+gitops_repo_token: "{{ lookup('ansible.builtin.env', 'GITOPS_REPO_TOKEN') }}"
+
+argocd_namespace: argocd
+argocd_chart_version: "10.9.6" # ArgoCD v3.5.x
+
+# Grafana admin password: generated once and stored on YOUR machine (not Git).
+grafana_admin_password_file: "~/.devops-lab/grafana-admin-password"

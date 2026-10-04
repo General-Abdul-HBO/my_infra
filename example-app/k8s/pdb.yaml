@@ -1,0 +1,13 @@
+# During voluntary disruptions (node upgrades, node group scale-in) Kubernetes
+# must keep at least one pod running - nodes are drained one pod at a time.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: example-app
+  labels:
+    app.kubernetes.io/name: example-app
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: example-app

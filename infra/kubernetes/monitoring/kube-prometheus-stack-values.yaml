@@ -1,0 +1,125 @@
+# Helm values for kube-prometheus-stack (deployed by ArgoCD - see
+# infra/kubernetes/apps/templates/kube-prometheus-stack.yaml).
+#
+# Note there is no hand-written prometheus.yml: the Prometheus Operator
+# GENERATES Prometheus' scrape config from ServiceMonitor/PodMonitor objects
+# (e.g. example-app/k8s/servicemonitor.yaml) and its alert rules from
+# PrometheusRule objects. Teams add monitoring by committing those objects.
+
+# --- EKS: the control plane is managed by AWS, so these components can't be
+# --- scraped. Disabling them avoids permanent false "TargetDown" alerts.
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeEtcd:
+  enabled: false
+kubeProxy:
+  enabled: false # kube-proxy on EKS exposes metrics only on 127.0.0.1
+
+defaultRules:
+  create: true
+  rules:
+    etcd: false
+    kubeControllerManager: false
+    kubeSchedulerAlerting: false
+    kubeSchedulerRecording: false
+    kubeProxy: false
+
+# --- Prometheus ----------------------------------------------------------------
+prometheus:
+  prometheusSpec:
+    retention: 7d
+    retentionSize: 15GB
+    # Select ServiceMonitors / PodMonitors / rules from ALL namespaces, not
+    # just ones carrying this Helm release's label.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+    resources:
+      requests: { cpu: 200m, memory: 1Gi }
+      limits: { memory: 2Gi }
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: gp3
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 20Gi
+
+# --- Alertmanager ----------------------------------------------------------------
+# Alerts are visible in the Alertmanager UI. Wiring a receiver (Slack, email)
+# is a good next exercise - see the deployment guide.
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests: { cpu: 25m, memory: 64Mi }
+      limits: { memory: 128Mi }
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: gp3
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 2Gi
+
+# --- Grafana ---------------------------------------------------------------------
+grafana:
+  # Must match the EKS Pod Identity association in
+  # infra/terraform/eks/pod_identity.tf (monitoring/grafana) - that's how
+  # Grafana gets read-only CloudWatch access without any AWS keys.
+  serviceAccount:
+    create: true
+    name: grafana
+
+  # Created by infra/ansible/argocd-bootstrap.yml. Using an existing secret
+  # matters with ArgoCD: a chart-generated random password would change on
+  # every render and constantly show the app as OutOfSync.
+  admin:
+    existingSecret: grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
+
+  # Everything in Grafana is defined as code (dashboards and data sources come
+  # from ConfigMaps), so no persistent disk is needed.
+  persistence:
+    enabled: false
+
+  defaultDashboardsTimezone: utc
+
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      searchNamespace: ALL
+      folderAnnotation: grafana_folder
+      provider:
+        foldersFromFilesStructure: true
+    datasources:
+      enabled: true
+      label: grafana_datasource
+      labelValue: "1"
+
+  resources:
+    requests: { cpu: 50m, memory: 256Mi }
+    limits: { memory: 512Mi }
+
+# --- Exporters -------------------------------------------------------------------
+kube-state-metrics:
+  resources:
+    requests: { cpu: 25m, memory: 64Mi }
+    limits: { memory: 256Mi }
+
+prometheus-node-exporter:
+  resources:
+    requests: { cpu: 25m, memory: 32Mi }
+    limits: { memory: 64Mi }
+
+prometheusOperator:
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 256Mi }

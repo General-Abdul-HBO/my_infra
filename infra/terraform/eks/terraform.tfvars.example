@@ -1,0 +1,17 @@
+# Copy to terraform.tfvars (git-ignored) and edit:
+#   cp terraform.tfvars.example terraform.tfvars
+
+# REQUIRED: your public IP, so only you can reach the Kubernetes API.
+#   curl -s https://checkip.amazonaws.com
+cluster_endpoint_public_access_cidrs = ["203.0.113.10/32"]
+
+# Optional overrides (defaults shown)
+# aws_region          = "us-east-1"
+# cluster_name        = "devops-lab-eks"
+# kubernetes_version  = "1.36"
+# node_instance_types = ["t3.medium"]   # smallest type that fits the platform (17 pods/node)
+# node_capacity_type  = "ON_DEMAND"
+# node_desired_size   = 3
+
+# Give another IAM identity (e.g. an SSO role) cluster-admin as well:
+# cluster_admin_principal_arns = ["arn:aws:iam::123456789012:role/AWSReservedSSO_AdministratorAccess_abc123"]

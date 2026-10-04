@@ -1,0 +1,37 @@
+# Wave -2: Prometheus Operator, Prometheus, Alertmanager, Grafana,
+# node-exporter and kube-state-metrics.
+#
+# Two sources: the Helm chart from the prometheus-community repo, plus our
+# values file from Git (referenced as $values).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kube-prometheus-stack
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: platform
+  sources:
+    - repoURL: https://prometheus-community.github.io/helm-charts
+      chart: kube-prometheus-stack
+      targetRevision: {{ .Values.versions.kubePrometheusStack }}
+      helm:
+        releaseName: kube-prometheus-stack
+        valueFiles:
+          - $values/infra/kubernetes/monitoring/kube-prometheus-stack-values.yaml
+    - repoURL: {{ .Values.repoURL }}
+      targetRevision: {{ .Values.targetRevision }}
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    {{- toYaml .Values.syncPolicy | nindent 4 }}
+    syncOptions:
+      - CreateNamespace=true
+      # The Prometheus CRDs are too big for client-side apply's
+      # last-applied annotation; server-side apply avoids that limit.
+      - ServerSideApply=true

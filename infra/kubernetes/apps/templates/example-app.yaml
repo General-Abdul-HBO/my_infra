@@ -1,0 +1,35 @@
+# Wave 0: the example application. Its manifests live with the app
+# (example-app/k8s), not with the infrastructure - the app team owns them.
+# This is the Application ArgoCD re-syncs whenever the image tag in
+# example-app/k8s/kustomization.yaml changes in Git.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: example-app
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: apps
+  source:
+    repoURL: {{ .Values.repoURL }}
+    targetRevision: {{ .Values.targetRevision }}
+    path: example-app/k8s
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: example-app
+  syncPolicy:
+    {{- toYaml .Values.syncPolicy | nindent 4 }}
+    syncOptions:
+      - CreateNamespace=true
+    managedNamespaceMetadata:
+      labels:
+        # Pod Security Admission: reject pods that run as root, escalate
+        # privileges, etc. The app's manifests are written to pass this.
+        pod-security.kubernetes.io/enforce: restricted
+        pod-security.kubernetes.io/warn: restricted
+        # ALB readiness gates: a new pod only counts as Ready once the ALB
+        # health check passes - real zero-downtime rolling updates.
+        elbv2.k8s.aws/pod-readiness-gate-inject: enabled
