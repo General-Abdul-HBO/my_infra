@@ -21,7 +21,7 @@ RUN --mount=type=cache,target=/root/.m2 mvn -B -ntp package -DskipTests=${SKIP_T
 RUN java -Djarmode=tools -jar target/example-app.jar extract --layers --launcher --destination target/extracted
 
 # ---- Runtime stage: JRE only, no Maven, no source code -----------------------
-FROM eclipse-temurin:21-jre-alpine
+FROM eclipse-temurin:25-jre-alpine
 
 # Fixed numeric UID/GID: Kubernetes can then verify runAsNonRoot.
 RUN addgroup -S -g 10001 app && adduser -S -u 10001 -G app -H -s /sbin/nologin app
