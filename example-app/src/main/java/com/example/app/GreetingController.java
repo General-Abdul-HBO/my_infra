@@ -29,12 +29,13 @@ public class GreetingController {
         this.hostname = resolveHostname();
     }
 
-    /** Which version is running, and on which pod - handy when watching a rolling update. */
+    /** Which version/commit is running, and on which pod - handy when watching a rolling update. */
     @GetMapping("/")
     public Map<String, String> info() {
         Map<String, String> body = new LinkedHashMap<>();
         body.put("app", "example-app");
         body.put("version", version);
+        body.put("commit", properties.commit());
         body.put("environment", properties.environment());
         body.put("pod", hostname);
         return body;

@@ -1,0 +1,22 @@
+# Dependabot opens pull requests when dependencies have updates or security
+# fixes. Each PR runs the CI workflow, so you see whether the update builds and
+# passes the tests before merging. Merging it deploys it like any other change.
+version: 2
+updates:
+  - package-ecosystem: github-actions # actions/checkout@v7 -> v8 ...
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: maven # Spring Boot, JaCoCo, ...
+    directory: /example-app
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: docker # base images in example-app/Dockerfile
+    directory: /example-app
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

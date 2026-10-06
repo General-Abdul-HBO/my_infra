@@ -1,0 +1,177 @@
+# Istio service mesh (sidecar mode). Four Applications, in order:
+#
+#   wave -6  istio-base            CRDs (VirtualService, PeerAuthentication, ...)
+#   wave -5  istio-cni             node agent that sets up traffic redirection,
+#                                  so app pods need NO privileged init container
+#   wave -5  istiod                control plane: injects sidecars, issues mTLS certs,
+#                                  pushes routing config to every Envoy proxy
+#   wave -3  istio-ingressgateway  the mesh's front door, behind the ALB
+#
+# istiod rewrites parts of its webhook configurations at runtime (CA bundle,
+# failure policy). ignoreDifferences stops ArgoCD reporting that as drift.
+{{- $webhookIgnores := list
+  (dict "group" "admissionregistration.k8s.io" "kind" "ValidatingWebhookConfiguration" "jqPathExpressions" (list ".webhooks[]?.clientConfig.caBundle" ".webhooks[]?.failurePolicy"))
+  (dict "group" "admissionregistration.k8s.io" "kind" "MutatingWebhookConfiguration" "jqPathExpressions" (list ".webhooks[]?.clientConfig.caBundle"))
+}}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: istio-base
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-6"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: platform
+  source:
+    repoURL: https://istio-release.storage.googleapis.com/charts
+    chart: base
+    targetRevision: {{ .Values.versions.istio }}
+    helm:
+      valuesObject:
+        defaultRevision: default
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: istio-system
+  ignoreDifferences:
+    {{- toYaml $webhookIgnores | nindent 4 }}
+  syncPolicy:
+    {{- toYaml .Values.syncPolicy | nindent 4 }}
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true # large CRDs
+      - RespectIgnoreDifferences=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: istio-cni
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: platform
+  source:
+    repoURL: https://istio-release.storage.googleapis.com/charts
+    chart: cni
+    targetRevision: {{ .Values.versions.istio }}
+    helm:
+      valuesObject:
+        # A DaemonSet: one agent per node, chained after the AWS VPC CNI.
+        resources:
+          requests: { cpu: 25m, memory: 64Mi }
+          limits: { memory: 256Mi }
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: istio-system
+  syncPolicy:
+    {{- toYaml .Values.syncPolicy | nindent 4 }}
+    syncOptions:
+      - CreateNamespace=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: istiod
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: platform
+  sources:
+    - repoURL: https://istio-release.storage.googleapis.com/charts
+      chart: istiod
+      targetRevision: {{ .Values.versions.istio }}
+      helm:
+        valuesObject:
+          pilot:
+            autoscaleEnabled: false
+            replicaCount: 1
+            resources:
+              requests: { cpu: 100m, memory: 256Mi }
+              limits: { memory: 1Gi }
+            # Tell the injector the CNI agent handles traffic redirection, so
+            # sidecars get no privileged istio-init container (Pod Security!).
+            cni:
+              enabled: true
+            env:
+              # Inject the proxy as a Kubernetes *native sidecar*: it starts
+              # before the app and stops after it, so no requests are dropped
+              # at startup or shutdown.
+              ENABLE_NATIVE_SIDECARS: "true"
+          global:
+            proxy:
+              # Every injected Envoy sidecar. Small - this is a lab cluster.
+              resources:
+                requests: { cpu: 50m, memory: 64Mi }
+                limits: { memory: 256Mi }
+          meshConfig:
+            # Envoy access logs on stdout:  kubectl logs <pod> -c istio-proxy
+            accessLogFile: /dev/stdout
+    # Mesh-wide security policy (STRICT mTLS), kept in Git next to istiod.
+    - repoURL: {{ .Values.repoURL }}
+      targetRevision: {{ .Values.targetRevision }}
+      path: infra/kubernetes/platform/istio
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: istio-system
+  ignoreDifferences:
+    {{- toYaml $webhookIgnores | nindent 4 }}
+  syncPolicy:
+    {{- toYaml .Values.syncPolicy | nindent 4 }}
+    syncOptions:
+      - CreateNamespace=true
+      - RespectIgnoreDifferences=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: istio-ingressgateway
+  namespace: argocd
+  annotations:
+    # After istiod (it injects the gateway's proxy) and the load balancer
+    # controller (it turns the Ingress below into the ALB).
+    argocd.argoproj.io/sync-wave: "-3"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: platform
+  sources:
+    - repoURL: https://istio-release.storage.googleapis.com/charts
+      chart: gateway
+      targetRevision: {{ .Values.versions.istio }}
+      helm:
+        releaseName: istio-ingressgateway # -> pods labelled istio=ingressgateway
+        valuesObject:
+          # The ALB sends traffic straight to gateway pod IPs, so the Service
+          # needs no load balancer of its own.
+          service:
+            type: ClusterIP
+          replicaCount: 2
+          autoscaling:
+            enabled: false
+          podDisruptionBudget:
+            minAvailable: 1
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { memory: 512Mi }
+    # The Istio Gateway listener + the ALB Ingress in front of it.
+    - repoURL: {{ .Values.repoURL }}
+      targetRevision: {{ .Values.targetRevision }}
+      path: infra/kubernetes/platform/istio-ingress
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: istio-ingress
+  syncPolicy:
+    {{- toYaml .Values.syncPolicy | nindent 4 }}
+    syncOptions:
+      - CreateNamespace=true
+    managedNamespaceMetadata:
+      labels:
+        # ALB readiness gates for the gateway pods: zero-downtime gateway rollouts.
+        elbv2.k8s.aws/pod-readiness-gate-inject: enabled

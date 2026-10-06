@@ -13,6 +13,8 @@ versions:
   awsLoadBalancerController: 3.5.0
   metricsServer: 3.14.0
   kubePrometheusStack: 91.9.0
+  istio: 1.30.5 # base, cni, istiod and gateway charts share one version
+  kiali: 2.32.0
 
 # Sync behaviour shared by every child Application.
 syncPolicy:

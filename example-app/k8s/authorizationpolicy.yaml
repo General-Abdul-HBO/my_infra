@@ -1,0 +1,30 @@
+# Zero trust: only the ingress gateway may call this app's HTTP port.
+#
+# mTLS gives every workload a cryptographic identity (its service account),
+# and this policy allows exactly one identity. Any other pod - even one inside
+# the mesh - gets "RBAC: access denied" (HTTP 403). Pods outside the mesh can't
+# even connect (STRICT mTLS). Try both in guide Phase 11.
+#
+# The management port (8081) bypasses the sidecar (see deployment.yaml), so
+# kubelet probes and Prometheus scraping aren't affected.
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: example-app
+  labels:
+    app.kubernetes.io/name: example-app
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: example-app
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/istio-ingress/sa/istio-ingressgateway
+      to:
+        - operation:
+            ports: ["8080"]

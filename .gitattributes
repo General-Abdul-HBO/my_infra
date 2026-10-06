@@ -1,0 +1,14 @@
+# Store and check out text files with LF line endings everywhere (Windows,
+# WSL, GitHub runners). Shell snippets, YAML and Terraform break or show
+# phantom diffs with CRLF, and this repo is edited from both Windows and WSL.
+* text=auto eol=lf
+
+# Binary files: never touch line endings
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.jar binary
+*.zip binary
+*.gz binary

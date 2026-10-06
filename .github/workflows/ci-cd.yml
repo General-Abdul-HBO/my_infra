@@ -1,0 +1,259 @@
+# example-app CI/CD
+#
+#   pull request -> build + test + SonarQube Cloud scan (quality gate)
+#   push to main -> the same, then:
+#                   build image -> push to ECR -> commit the new tag to Git
+#                   -> ArgoCD (in EKS) sees the commit and rolls out the new version
+#
+# CI never touches the cluster. It only changes Git; ArgoCD does the deploying.
+#
+# Repo settings it needs (docs/DEPLOYMENT-GUIDE.md, Phase 10):
+#   secret   SONAR_TOKEN
+#   variable SONAR_ORGANIZATION, SONAR_PROJECT_KEY, AWS_REGION, AWS_ROLE_ARN
+#   variable ECR_FAIL_ON_CRITICAL (optional, "true" = block deploys with CRITICAL CVEs)
+name: example-app CI/CD
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "example-app/**"
+      - "!example-app/k8s/**"
+      - "!example-app/**/*.md"
+      - ".github/workflows/ci-cd.yml"
+  push:
+    branches: [main]
+    paths:
+      - "example-app/**"
+      # Manifest-only changes (config, replicas...) are pure GitOps: ArgoCD
+      # applies them directly, there's nothing to build. This also stops the
+      # pipeline's own tag-bump commit from triggering another run.
+      - "!example-app/k8s/**"
+      - "!example-app/**/*.md"
+      - ".github/workflows/ci-cd.yml"
+  workflow_dispatch: {} # "Run workflow" button in the Actions tab
+
+# Least privilege: every job gets read-only access unless it asks for more.
+permissions:
+  contents: read
+
+# One run per branch at a time. New pushes to a PR cancel its older run;
+# runs on main queue up instead (never cancel a deploy halfway).
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  ECR_REPOSITORY: example-app
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. Build, unit tests, coverage, SonarQube Cloud analysis + quality gate
+  # ---------------------------------------------------------------------------
+  build-test-scan:
+    name: Build, test & scan
+    runs-on: ubuntu-latest
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
+      SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # full history: SonarQube Cloud uses it to tell new code from old
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Cache SonarQube Cloud analyzers
+        uses: actions/cache@v6
+        with:
+          path: ~/.sonar/cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
+
+      # verify = compile + unit tests + JaCoCo coverage report.
+      # sonar  = send code + coverage to SonarQube Cloud; qualitygate.wait makes
+      #          this step FAIL if the quality gate fails, which stops the pipeline
+      #          before any image is built.
+      - name: Build, test and analyse
+        working-directory: example-app
+        run: |
+          if [ -n "$SONAR_TOKEN" ]; then
+            mvn -B -ntp verify \
+              org.sonarsource.scanner.maven:sonar-maven-plugin:5.8.0.7211:sonar \
+              -Dsonar.organization="$SONAR_ORGANIZATION" \
+              -Dsonar.projectKey="$SONAR_PROJECT_KEY" \
+              -Dsonar.qualitygate.wait=true
+          else
+            # Secrets aren't available to PRs from forks or Dependabot.
+            echo "::warning::SONAR_TOKEN not available - running tests without the SonarQube Cloud scan"
+            mvn -B -ntp verify
+          fi
+
+      - name: Upload test and coverage reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-reports
+          path: |
+            example-app/target/surefire-reports/
+            example-app/target/site/jacoco/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Summary
+        if: env.SONAR_TOKEN != ''
+        run: |
+          echo "### SonarQube Cloud" >> "$GITHUB_STEP_SUMMARY"
+          echo "https://sonarcloud.io/dashboard?id=${SONAR_PROJECT_KEY}" >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # 2. Build the image and push it to ECR (main only)
+  # ---------------------------------------------------------------------------
+  publish-image:
+    name: Build & push image
+    needs: build-test-scan
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # lets this job request GitHub's OIDC token to log in to AWS
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # No AWS keys anywhere: GitHub's signed token is exchanged for a 1-hour
+      # session on the role from infra/terraform/tooling/github_oidc.tf.
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # Tag = short commit SHA: every image traces back to exactly one commit.
+      # ECR tags are immutable, so on a re-run of the same commit we skip the build.
+      - name: Compute image tag
+        id: meta
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          TAG="$(git rev-parse --short=7 HEAD)"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "image=${REGISTRY}/${ECR_REPOSITORY}" >> "$GITHUB_OUTPUT"
+          if aws ecr describe-images --repository-name "$ECR_REPOSITORY" --image-ids imageTag="$TAG" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${ECR_REPOSITORY}:${TAG} is already in ECR (re-run) - skipping the build"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Docker Buildx
+        if: steps.meta.outputs.exists == 'false'
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and push
+        if: steps.meta.outputs.exists == 'false'
+        uses: docker/build-push-action@v7
+        with:
+          context: example-app
+          push: true
+          tags: ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
+          build-args: |
+            GIT_SHA=${{ steps.meta.outputs.tag }}
+            SKIP_TESTS=true
+          # Reuse layers from earlier runs (GitHub Actions cache)
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # Plain single-platform image: keeps ECR scanning and lifecycle simple
+          provenance: false
+          sbom: false
+
+      # ECR scans every pushed image (scan on push). Show the result, and
+      # optionally block the deploy on CRITICAL findings.
+      - name: ECR vulnerability scan
+        if: steps.meta.outputs.exists == 'false'
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+          FAIL_ON_CRITICAL: ${{ vars.ECR_FAIL_ON_CRITICAL }}
+        run: |
+          aws ecr wait image-scan-complete --repository-name "$ECR_REPOSITORY" --image-id imageTag="$TAG"
+          COUNTS="$(aws ecr describe-image-scan-findings --repository-name "$ECR_REPOSITORY" \
+            --image-id imageTag="$TAG" --query 'imageScanFindings.findingSeverityCounts' --output json)"
+          echo "Scan findings: ${COUNTS}"
+          {
+            echo "### ECR scan: \`${ECR_REPOSITORY}:${TAG}\`"
+            echo '```json'
+            echo "${COUNTS}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          CRITICAL="$(echo "$COUNTS" | jq -r '.CRITICAL // 0')"
+          if [ "$FAIL_ON_CRITICAL" = "true" ] && [ "$CRITICAL" -gt 0 ]; then
+            echo "::error::${CRITICAL} CRITICAL vulnerabilities - not deploying (ECR_FAIL_ON_CRITICAL=true)"
+            exit 1
+          fi
+
+  # ---------------------------------------------------------------------------
+  # 3. Deploy = commit the new tag. ArgoCD notices and rolls it out.
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Deploy (GitOps commit)
+    needs: publish-image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the tag-bump commit
+    concurrency:
+      group: gitops-deploy-example-app
+      cancel-in-progress: false
+    steps:
+      # Latest main, not the triggering commit - main may have moved on since.
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - name: Point the manifests at the new image
+        env:
+          IMAGE: ${{ needs.publish-image.outputs.image }}
+          TAG: ${{ needs.publish-image.outputs.tag }}
+        run: |
+          FILE=example-app/k8s/kustomization.yaml
+          # kustomization.yaml has exactly one image entry.
+          sed -i -E "s|^([[:space:]]*newName:).*|\1 ${IMAGE}|; s|^([[:space:]]*newTag:).*|\1 \"${TAG}\"|" "$FILE"
+          git diff -- "$FILE"
+          # Sanity check: render the manifests exactly as ArgoCD will.
+          kubectl kustomize example-app/k8s | grep -E '^[[:space:]]+image:'
+
+      - name: Commit and push
+        env:
+          TAG: ${{ needs.publish-image.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet; then
+            echo "Manifests already point at ${TAG} - nothing to deploy"
+            exit 0
+          fi
+          git commit -am "deploy(example-app): ${TAG} [skip ci]"
+          # Someone may have pushed in the meantime: rebase and retry.
+          for attempt in 1 2 3; do
+            if git push origin HEAD:main; then
+              {
+                echo "### Deployed \`${TAG}\` via GitOps"
+                echo "ArgoCD syncs within ~3 minutes. Watch it:"
+                echo "\`kubectl get application example-app -n argocd -w\`"
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "main moved on - rebasing and retrying (${attempt}/3)"
+            git pull --rebase origin main
+          done
+          exit 1

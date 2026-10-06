@@ -1,0 +1,14 @@
+# Mesh-wide (it lives in the root namespace, istio-system): every workload
+# with a sidecar ONLY accepts mutual-TLS traffic from other sidecars.
+# Plain-text connections from outside the mesh are refused.
+#
+# Ports excluded from the sidecar (example-app's management port 8081, used by
+# kubelet probes and Prometheus) are not affected.
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: istio-system
+spec:
+  mtls:
+    mode: STRICT

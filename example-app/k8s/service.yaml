@@ -9,9 +9,13 @@ spec:
   selector:
     app.kubernetes.io/name: example-app
   ports:
-    - name: http # app traffic - the Ingress/ALB targets this
+    # appProtocol tells Istio how to handle each port. "http" = full L7
+    # features: routing, retries, per-request metrics, access logs.
+    - name: http # app traffic - the Istio ingress gateway routes here (virtualservice.yaml)
       port: 80
       targetPort: http
+      appProtocol: http
     - name: management # actuator - Prometheus scrapes this (servicemonitor.yaml)
       port: 8081
       targetPort: management
+      appProtocol: http

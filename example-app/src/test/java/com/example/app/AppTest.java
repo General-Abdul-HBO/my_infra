@@ -23,7 +23,8 @@ class AppTest {
         mvc.perform(get("/"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.app", is("example-app")))
-                .andExpect(jsonPath("$.version", is("0.1.0")));
+                .andExpect(jsonPath("$.version", is("0.1.0")))
+                .andExpect(jsonPath("$.commit", is("local")));
     }
 
     @Test

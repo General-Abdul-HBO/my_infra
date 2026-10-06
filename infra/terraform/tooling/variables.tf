@@ -19,3 +19,23 @@ variable "ecr_force_delete" {
   type        = bool
   default     = true
 }
+
+# --- GitHub Actions (CI/CD) ---------------------------------------------------
+
+variable "github_repository" {
+  description = "owner/repo whose workflows may push images. Case-sensitive - must match GitHub exactly."
+  type        = string
+  default     = "General-Abdul-HBO/my_infra"
+}
+
+variable "github_branch" {
+  description = "Only workflow runs on this branch can assume the CI role."
+  type        = string
+  default     = "main"
+}
+
+variable "create_github_oidc_provider" {
+  description = "AWS allows one GitHub OIDC provider per account. Set false if one already exists."
+  type        = bool
+  default     = true
+}

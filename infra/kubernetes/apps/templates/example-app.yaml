@@ -27,9 +27,9 @@ spec:
     managedNamespaceMetadata:
       labels:
         # Pod Security Admission: reject pods that run as root, escalate
-        # privileges, etc. The app's manifests are written to pass this.
+        # privileges, etc. The app's manifests (and Istio's injected sidecar,
+        # thanks to the Istio CNI agent) are written to pass this.
         pod-security.kubernetes.io/enforce: restricted
         pod-security.kubernetes.io/warn: restricted
-        # ALB readiness gates: a new pod only counts as Ready once the ALB
-        # health check passes - real zero-downtime rolling updates.
-        elbv2.k8s.aws/pod-readiness-gate-inject: enabled
+        # Istio: inject an Envoy sidecar into every pod in this namespace.
+        istio-injection: enabled

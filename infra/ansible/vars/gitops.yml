@@ -1,6 +1,6 @@
 # The Git repository ArgoCD watches. Push this whole repo (my_infra) to GitHub
 # and put its HTTPS clone URL here.
-gitops_repo_url: "https://github.com/CHANGE-ME/my_infra.git"
+gitops_repo_url: "https://github.com/General-Abdul-HBO/my_infra.git"
 gitops_target_revision: main
 
 # PRIVATE repo only: create a GitHub fine-grained token with read-only

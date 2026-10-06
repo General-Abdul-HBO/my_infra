@@ -20,6 +20,12 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: example-app
+      annotations:
+        # Istio injects an Envoy sidecar into this pod (namespace label
+        # istio-injection=enabled). The management port skips the sidecar so
+        # kubelet probes and Prometheus - which are outside the mesh and don't
+        # speak mTLS - can still reach /actuator/* directly.
+        traffic.sidecar.istio.io/excludeInboundPorts: "8081"
     spec:
       # Restricted Pod Security: non-root, no privilege escalation, no Linux
       # capabilities, default seccomp profile, read-only root filesystem.
@@ -90,7 +96,7 @@ spec:
             failureThreshold: 3
           lifecycle:
             # Keep serving for a few seconds after termination starts, while the
-            # ALB finishes deregistering this pod - avoids 502s during rollouts.
+            # gateway's Envoy learns this pod is gone - avoids 503s during rollouts.
             preStop:
               exec:
                 command: ["sh", "-c", "sleep 10"]

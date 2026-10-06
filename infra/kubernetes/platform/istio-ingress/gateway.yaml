@@ -1,0 +1,22 @@
+# The listener on the Istio ingress gateway pods (deployed by the istio/gateway
+# chart, labelled istio=ingressgateway). Apps attach routes to it with a
+# VirtualService that references "istio-ingress/public-gateway".
+#
+# TLS is terminated at the ALB (once you add a certificate), so the gateway
+# listens on plain HTTP inside the VPC. From the gateway onwards, every hop
+# is mutual TLS inside the mesh.
+apiVersion: networking.istio.io/v1
+kind: Gateway
+metadata:
+  name: public-gateway
+  namespace: istio-ingress
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+    - port:
+        number: 80
+        name: http
+        protocol: HTTP
+      hosts:
+        - "*"

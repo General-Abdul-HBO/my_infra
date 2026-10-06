@@ -1,20 +1,26 @@
-# The AWS Load Balancer Controller turns this into an internet-facing
-# Application Load Balancer in the PUBLIC subnets, forwarding straight to the
-# pod IPs in the PRIVATE subnets (target-type ip).
+# The one public entry point: an internet-facing ALB (created by the AWS Load
+# Balancer Controller) in the PUBLIC subnets, sending traffic to the Istio
+# ingress gateway pods' IPs in the PRIVATE subnets.
 #
-# Find its address:  kubectl get ingress -n example-app
+#   internet -> ALB -> istio-ingressgateway (Envoy) --mTLS--> app sidecar -> app
+#
+# Find its address:  kubectl get ingress public -n istio-ingress
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: example-app
-  labels:
-    app.kubernetes.io/name: example-app
+  name: public
+  namespace: istio-ingress
   annotations:
-    alb.ingress.kubernetes.io/load-balancer-name: example-app
+    alb.ingress.kubernetes.io/load-balancer-name: devops-lab-public
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
-    alb.ingress.kubernetes.io/healthcheck-path: /readyz
+    # Health-check the gateway itself (Envoy's readiness endpoint on the
+    # status port), not an app behind it - one unhealthy app shouldn't take
+    # the whole entry point out of the ALB. The controller also opens this
+    # port in the security group.
+    alb.ingress.kubernetes.io/healthcheck-port: "15021"
+    alb.ingress.kubernetes.io/healthcheck-path: /healthz/ready
     alb.ingress.kubernetes.io/healthcheck-interval-seconds: "10"
     alb.ingress.kubernetes.io/healthy-threshold-count: "2"
     alb.ingress.kubernetes.io/target-group-attributes: deregistration_delay.timeout_seconds=30
@@ -28,13 +34,8 @@ metadata:
     # alb.ingress.kubernetes.io/ssl-redirect: "443"
 spec:
   ingressClassName: alb
-  rules:
-    - http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: example-app
-                port:
-                  name: http
+  defaultBackend:
+    service:
+      name: istio-ingressgateway
+      port:
+        number: 80

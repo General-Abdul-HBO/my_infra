@@ -1,5 +1,9 @@
-# Scale between 2 and 6 pods to keep average CPU around 70% of the requested
-# CPU (250m). Needs metrics-server (installed by ArgoCD in kube-system).
+# Scale between 2 and 6 pods to keep the APP container's average CPU around
+# 70% of its request (250m). Needs metrics-server (installed by ArgoCD).
+#
+# ContainerResource (not Resource): each pod also runs Istio's Envoy sidecar.
+# A plain "Resource" metric would average app + sidecar together, so a busy
+# proxy or an idle app would skew scaling decisions.
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
@@ -14,9 +18,10 @@ spec:
   minReplicas: 2
   maxReplicas: 6
   metrics:
-    - type: Resource
-      resource:
+    - type: ContainerResource
+      containerResource:
         name: cpu
+        container: example-app
         target:
           type: Utilization
           averageUtilization: 70

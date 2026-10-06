@@ -1,8 +1,8 @@
 # ArgoCD renders this folder with Kustomize (example-app Application).
 #
 # DEPLOYING A NEW VERSION = changing newTag below and pushing to Git.
-# ArgoCD notices the commit and rolls the Deployment. Later the CI pipeline
-# will make this edit for you (`kustomize edit set image ...`).
+# ArgoCD notices the commit and rolls the Deployment. The CI pipeline
+# (.github/workflows/ci-cd.yml) makes this edit for you on every merge to main.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: example-app
@@ -15,7 +15,8 @@ labels:
 resources:
   - deployment.yaml
   - service.yaml
-  - ingress.yaml
+  - virtualservice.yaml # route from the shared Istio ingress gateway
+  - authorizationpolicy.yaml # only the gateway may call us
   - hpa.yaml
   - pdb.yaml
   - servicemonitor.yaml

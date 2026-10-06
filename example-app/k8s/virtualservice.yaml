@@ -1,0 +1,33 @@
+# How traffic arriving at the mesh's front door (the shared ingress gateway,
+# owned by the platform team) reaches this app. The app team owns its routes;
+# the platform owns the gateway and the ALB.
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: example-app
+  labels:
+    app.kubernetes.io/name: example-app
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  hosts:
+    - "*" # no domain yet - match any Host header (the ALB's DNS name)
+  gateways:
+    - istio-ingress/public-gateway
+  http:
+    - name: default
+      route:
+        - destination:
+            host: example-app.example-app.svc.cluster.local
+            port:
+              number: 80
+      # Give up after 10s (the slowest endpoint, /api/slow, caps at 5s).
+      timeout: 10s
+      # Retry only failures where the request never reached the app (pod
+      # restarting, connection refused). Never retry 500s: that would hide
+      # real errors and multiply load. Try the fault-injection exercise in
+      # the guide (Phase 11) to see these settings matter.
+      retries:
+        attempts: 2
+        perTryTimeout: 5s
+        retryOn: connect-failure,refused-stream,unavailable,cancelled

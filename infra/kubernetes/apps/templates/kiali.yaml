@@ -1,0 +1,43 @@
+# Wave -1: Kiali - the service mesh console. Draws the live traffic graph
+# between workloads (from Prometheus' Istio metrics), shows which connections
+# are mTLS-encrypted, and validates Istio config.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kiali
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: platform
+  source:
+    repoURL: https://kiali.org/helm-charts
+    chart: kiali-server
+    targetRevision: {{ .Values.versions.kiali }}
+    helm:
+      valuesObject:
+        istio_namespace: istio-system
+        auth:
+          # Reached only through `kubectl port-forward`, which already requires
+          # cluster credentials - so no separate Kiali login.
+          strategy: anonymous
+        deployment:
+          # Config changes go through Git, not the Kiali UI.
+          view_only_mode: true
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 512Mi }
+        external_services:
+          prometheus:
+            url: http://kube-prometheus-stack-prometheus.monitoring:9090
+          grafana:
+            enabled: false
+          tracing:
+            enabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: istio-system
+  syncPolicy:
+    {{- toYaml .Values.syncPolicy | nindent 4 }}
