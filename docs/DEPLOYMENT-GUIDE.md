@@ -800,13 +800,23 @@ would leave pods running on the old values.
 
 ### B. Ship a new version by hand (exactly what the Phase 10 pipeline automates)
 
-1. Change something visible, e.g. the version in `example-app/pom.xml` → `0.2.0`.
+1. **Change the code**, here the version, so the new image really is different:
+   - `example-app/pom.xml`: the `<version>` right under `<artifactId>example-app` → `0.2.0`
+   - `example-app/src/test/java/com/example/app/AppTest.java`: the test
+     `infoReportsAppNameAndVersion` expects `"0.1.0"` → change it to `"0.2.0"`
+     (otherwise the build fails: the test is doing its job).
 2. Build and push:
    ```bash
    cd ~/code/my_infra/example-app
    docker build --provenance=false -t "$REGISTRY/example-app:0.2.0" .
    ( eval "$(aws configure export-credentials --format env)" && docker push "$REGISTRY/example-app:0.2.0" )
    ```
+   🧠 Skip step 1 and Docker rebuilds the *identical* image from cache. ECR
+   then shows one image tagged `0.2.0, 0.1.0`: same digest, two labels. A
+   **tag** is a name, the **digest** (`sha256:…`) is the content. Check with
+   `aws ecr describe-images --repository-name example-app`. To undo a wrong tag:
+   `aws ecr batch-delete-image --repository-name example-app --image-ids imageTag=0.2.0`
+   (removes only that tag; the image keeps `0.1.0`).
 3. In a **second terminal**, watch for downtime:
    ```bash
    while true; do curl -s -m 2 http://$ALB/ | jq -r .version || echo FAIL; sleep 0.5; done
@@ -986,14 +996,15 @@ branch → PR → checks → merge → deploy.
    git switch main && git pull --rebase
    git switch -c feature/hello-pipeline
    ```
-2. **Make a visible change:** bump the version to `0.2.0` in
-   `example-app/pom.xml` (the `<version>` right under `<artifactId>example-app`).
-   Run the tests (`docker build --provenance=false -t t example-app`): one
-   **fails**, because `AppTest.infoReportsAppNameAndVersion` expects `0.1.0`.
-   Update it to `0.2.0`. That's the test doing its job.
+2. **Make a visible change:** bump the version to `0.3.0` (from `0.2.0`
+   after Phase 9-B) in `example-app/pom.xml` (the `<version>` right under
+   `<artifactId>example-app`). Run the tests
+   (`docker build --provenance=false -t t example-app`): one **fails**,
+   because `AppTest.infoReportsAppNameAndVersion` expects the old version.
+   Update it to `0.3.0`. That's the test doing its job.
 3. **Push the branch and open a PR:**
    ```bash
-   git commit -am "example-app: version 0.2.0"
+   git commit -am "example-app: version 0.3.0"
    git push -u origin feature/hello-pipeline
    gh pr create --fill          # or click "Compare & pull request" on github.com
    ```
@@ -1015,9 +1026,10 @@ branch → PR → checks → merge → deploy.
    ALB=$(kubectl get ingress public -n istio-ingress -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
    watch -n2 "curl -s http://$ALB/ | jq -c '{version, commit, pod}'"
    ```
-   `version` becomes `0.2.0` and `commit` the new short SHA (matching `git
+   `version` becomes `0.3.0` and `commit` the new short SHA (matching `git
    log`). The commit you merged is now running in EKS, with no manual step after
-   the merge.
+   the merge. In ECR, this image is tagged with the commit SHA, not `0.3.0`:
+   the pipeline always tags by commit.
 
 Note that the deploy commit doesn't trigger another run: its message has
 `[skip ci]`, it only changes `example-app/k8s/**` (excluded from the

@@ -34,4 +34,4 @@ images:
   - name: example-app
     # Replace ACCOUNT_ID with your AWS account ID (terraform output ecr_registry)
     newName: 916714440230.dkr.ecr.us-east-1.amazonaws.com/example-app
-    newTag: "0.1.0"
+    newTag: "0.2.0"
