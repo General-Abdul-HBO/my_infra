@@ -33,5 +33,5 @@ configMapGenerator:
 images:
   - name: example-app
     # Replace ACCOUNT_ID with your AWS account ID (terraform output ecr_registry)
-    newName: ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/example-app
+    newName: 916714440230.dkr.ecr.us-east-1.amazonaws.com/example-app
     newTag: "0.1.0"
