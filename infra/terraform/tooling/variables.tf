@@ -35,7 +35,12 @@ variable "github_branch" {
 }
 
 variable "create_github_oidc_provider" {
-  description = "AWS allows one GitHub OIDC provider per account. Set false if one already exists."
+  description = <<-EOT
+    true = this stack creates and OWNS the GitHub OIDC provider (the normal case).
+    Set false ONLY if the very first apply fails with EntityAlreadyExists, i.e. the
+    provider was created outside this stack. Never flip it to false after this stack
+    created the provider: Terraform would DELETE it and CI logins to AWS would break.
+  EOT
   type        = bool
   default     = true
 }

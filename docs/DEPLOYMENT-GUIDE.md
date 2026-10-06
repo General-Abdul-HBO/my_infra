@@ -140,6 +140,9 @@ curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 |
 # istioctl - Istio's debugging CLI (Phase 11), same version as the mesh
 curl -fsSL https://github.com/istio/istio/releases/download/1.30.5/istioctl-1.30.5-linux-amd64.tar.gz | tar xz -C /tmp
 sudo install -m 0755 /tmp/istioctl /usr/local/bin/istioctl
+
+# Amazon ECR credential helper - lets Docker push to ECR without `docker login` (Phase 5)
+sudo apt install -y amazon-ecr-credential-helper
 ```
 
 **Docker:** open Docker Desktop on Windows → *Settings → Resources → WSL
@@ -472,9 +475,13 @@ aws ecr describe-repositories --query 'repositories[].repositoryUri'
 terraform output github_actions_role_arn
 ```
 
-`EntityAlreadyExists ... token.actions.githubusercontent.com`? Your account
-already has a GitHub OIDC provider (one is allowed per account). Add
+`EntityAlreadyExists ... token.actions.githubusercontent.com` on the **first**
+apply? Something outside this stack already created your account's GitHub
+OIDC provider (one is allowed per account). Add
 `create_github_oidc_provider = false` to `terraform.tfvars` and apply again.
+⚠️ Only in that case. If this stack created the provider (no error), leave the
+setting alone: switching it to `false` later makes Terraform **delete** the
+provider, and every pipeline run then fails at the AWS login.
 
 ---
 
@@ -501,9 +508,23 @@ docker rm -f ea
 
 ```bash
 REGISTRY=$(terraform -chdir=../infra/terraform/tooling output -raw ecr_registry)
-aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin "$REGISTRY"
+
+# One-time: let the ECR credential helper (installed in step 1.2) handle auth
+# for this registry. Other registries keep using Docker Desktop's store.
+python3 - "$REGISTRY" <<'EOF'
+import json, os, sys
+p = os.path.expanduser("~/.docker/config.json")
+d = json.load(open(p)) if os.path.exists(p) else {}
+d.setdefault("credHelpers", {})[sys.argv[1]] = "ecr-login"
+os.makedirs(os.path.dirname(p), exist_ok=True)
+json.dump(d, open(p, "w"), indent=2)
+EOF
+
 docker tag example-app:0.1.0 "$REGISTRY/example-app:0.1.0"
-docker push "$REGISTRY/example-app:0.1.0"
+
+# Push. The ( ... ) subshell hands the ECR helper short-lived standard AWS
+# credentials (see the note below) without changing your normal shell.
+( eval "$(aws configure export-credentials --format env)" && docker push "$REGISTRY/example-app:0.1.0" )
 
 # Vulnerability scan results (scan on push)
 aws ecr describe-image-scan-findings --repository-name example-app --image-id imageTag=0.1.0 \
@@ -527,6 +548,26 @@ git add example-app/k8s/kustomization.yaml && git commit -m "example-app: use EC
 
 **Immutable tags:** `0.1.0` can never be overwritten, so a tag in Git always
 means the exact same bytes. Every new build needs a new tag.
+
+🧠 **Why not `aws ecr get-login-password | docker login`?** It's in most
+tutorials, but on Docker Desktop with WSL it fails with *"error storing
+credentials ... The stub received bad data"*. Docker Desktop saves logins in
+Windows Credential Manager, and ECR's tokens (~2,650 characters) exceed its
+2,560-byte limit. The ECR credential helper avoids storing anything: Docker
+asks it for a fresh token (using your AWS credentials) whenever it talks to ECR.
+
+🧠 **Why the `export-credentials` subshell?** If you sign in with **`aws
+login`** (`login_session` in `~/.aws/config`; `aws configure list` shows type
+`login`), the ECR helper from Ubuntu's repository is too old to read that
+kind of session. It then hunts for an EC2 instance role and fails with
+`no basic auth credentials`. `aws configure export-credentials` converts your
+session into standard short-lived keys that every AWS tool understands. The
+subshell keeps them out of your normal terminal, so nothing lingers after they
+expire. (With classic access keys from `aws configure`, a plain `docker push`
+also works.)
+
+Handy shortcut for `~/.bashrc`:
+`ecr-push() { ( eval "$(aws configure export-credentials --format env)" && docker push "$@" ); }`
 
 ---
 
@@ -763,7 +804,8 @@ would leave pods running on the old values.
 2. Build and push:
    ```bash
    cd ~/code/my_infra/example-app
-   docker build -t "$REGISTRY/example-app:0.2.0" . && docker push "$REGISTRY/example-app:0.2.0"
+   docker build --provenance=false -t "$REGISTRY/example-app:0.2.0" .
+   ( eval "$(aws configure export-credentials --format env)" && docker push "$REGISTRY/example-app:0.2.0" )
    ```
 3. In a **second terminal**, watch for downtime:
    ```bash
@@ -1361,6 +1403,8 @@ aws logs describe-log-groups --log-group-name-prefix /aws/eks --query 'logGroups
 | Pipeline didn't run at all | Only changes under `example-app/` (except `k8s/` and `*.md`) or to the workflow file trigger it, and `[skip ci]` commits never do. Use *Run workflow* (manual trigger) to force a run. |
 | Your `git push` is rejected (`fetch first` / non-fast-forward) | The pipeline pushed a deploy commit to `main` after your last pull. Run `git pull --rebase` and push again. |
 | `tag invalid: The image tag '...' already exists` | Immutable tags. The pipeline skips existing tags automatically, so this only happens with manual pushes: use a new tag. |
+| `docker login` to ECR: `error storing credentials ... The stub received bad data` | Docker Desktop stores logins in Windows Credential Manager, and ECR tokens are too large for it. Use the ECR credential helper instead (Phase 5): no `docker login` needed. |
+| `docker push` to ECR: `no basic auth credentials` / `denied` | Check `~/.ecr/log/ecr-login.log`. **`no EC2 IMDS role found`** means the helper can't read your `aws login` session, so push inside the `export-credentials` subshell (Phase 5). Otherwise: the `credHelpers` entry is missing or names the wrong registry (`cat ~/.docker/config.json`), the helper isn't installed (`command -v docker-credential-ecr-login`), or your identity lacks ECR access. |
 
 Handy commands: `kubectl get events -A --sort-by=.lastTimestamp | tail -30`,
 `kubectl describe pod <pod> -n <ns>`, `kubectl logs <pod> -n <ns> --previous`.

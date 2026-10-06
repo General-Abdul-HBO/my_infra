@@ -6,4 +6,6 @@
 # GitHub Actions OIDC role (defaults shown)
 # github_repository           = "General-Abdul-HBO/my_infra"
 # github_branch               = "main"
-# create_github_oidc_provider = true   # false if your account already has one
+# create_github_oidc_provider = true   # leave true. false ONLY if the FIRST apply fails with
+#                                      # EntityAlreadyExists (provider made outside this stack).
+#                                      # Flipping it later makes Terraform DELETE the provider.
