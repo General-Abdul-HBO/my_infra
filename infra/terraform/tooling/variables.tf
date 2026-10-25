@@ -34,6 +34,23 @@ variable "github_branch" {
   default     = "main"
 }
 
+# GitHub puts these numeric IDs in the OIDC token's "sub" claim. Look them up:
+#   curl -s https://api.github.com/repos/OWNER/REPO | jq '.owner.id, .id'
+# If a pipeline run fails with "Not authorized to perform
+# sts:AssumeRoleWithWebIdentity", compare with the real claim in CloudTrail
+# (see the guide's troubleshooting table).
+variable "github_owner_id" {
+  description = "Numeric ID of the repo owner (user/org). null = use the name-only sub format."
+  type        = number
+  default     = 85952139
+}
+
+variable "github_repository_id" {
+  description = "Numeric ID of the repository. null = use the name-only sub format."
+  type        = number
+  default     = 1404672337
+}
+
 variable "create_github_oidc_provider" {
   description = <<-EOT
     true = this stack creates and OWNS the GitHub OIDC provider (the normal case).

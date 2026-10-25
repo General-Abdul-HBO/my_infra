@@ -24,6 +24,20 @@ data "aws_iam_openid_connect_provider" "github" {
 
 locals {
   github_oidc_provider_arn = var.create_github_oidc_provider ? aws_iam_openid_connect_provider.github[0].arn : data.aws_iam_openid_connect_provider.github[0].arn
+
+  # The token's "sub" claim names the repo and branch of the run. GitHub now
+  # includes the immutable numeric owner/repo IDs:
+  #   repo:General-Abdul-HBO@85952139/my_infra@1404672337:ref:refs/heads/main
+  # Pinning the IDs means a deleted-and-recreated repo with the same name can
+  # never use this role. With the IDs set to null, the older name-only format
+  # (repo:OWNER/REPO:ref:refs/heads/BRANCH) is used instead.
+  github_owner = split("/", var.github_repository)[0]
+  github_repo  = split("/", var.github_repository)[1]
+  github_oidc_subject = (
+    var.github_owner_id != null && var.github_repository_id != null
+    ? "repo:${local.github_owner}@${var.github_owner_id}/${local.github_repo}@${var.github_repository_id}:ref:refs/heads/${var.github_branch}"
+    : "repo:${var.github_repository}:ref:refs/heads/${var.github_branch}"
+  )
 }
 
 # Who may assume the role: ONLY workflow runs from this repo, on this branch.
@@ -46,7 +60,7 @@ data "aws_iam_policy_document" "github_actions_assume" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repository}:ref:refs/heads/${var.github_branch}"]
+      values   = [local.github_oidc_subject]
     }
   }
 }

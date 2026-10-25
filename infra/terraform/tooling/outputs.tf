@@ -11,3 +11,8 @@ output "github_actions_role_arn" {
   description = "Put this in the GitHub repo variable AWS_ROLE_ARN."
   value       = aws_iam_role.github_actions.arn
 }
+
+output "github_oidc_subject" {
+  description = "The exact token 'sub' the CI role trusts (compare with CloudTrail if logins fail)."
+  value       = local.github_oidc_subject
+}

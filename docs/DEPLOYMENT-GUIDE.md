@@ -466,7 +466,9 @@ This creates:
 - **The GitHub Actions OIDC provider and the `devops-lab-github-actions` role**,
   used by the pipeline in Phase 10. Only workflow runs from
   `General-Abdul-HBO/my_infra` on `main` can assume it, and it may only push
-  to this ECR repository.
+  to this ECR repository. The trust is pinned to the repo's **numeric GitHub
+  IDs** (`github_owner_id`, `github_repository_id`), so a different repo
+  created later under the same name can never use it.
 
 **Verify:**
 
@@ -1397,7 +1399,7 @@ aws logs describe-log-groups --log-group-name-prefix /aws/eks --query 'logGroups
 | Sonar: "You are running CI analysis while Automatic Analysis is enabled" | Turn Automatic Analysis off (Phase 10.3 step 4). |
 | Sonar: "Not authorized" / "Project not found" | Wrong `sonar.organization`/`sonar.projectKey`, or `SONAR_TOKEN` not set/expired. Keys are case-sensitive. |
 | Sonar shows 0% coverage | Run `mvn verify` (not just `package`) in the same command as the scan; the JaCoCo report is generated in `verify`. |
-| Pipeline: `Not authorized to perform sts:AssumeRoleWithWebIdentity` | The token's claims don't match the role's trust policy. Check `github_repository` in the tooling stack matches GitHub **exactly** (case-sensitive), the run is on `main`, and `AWS_ROLE_ARN` is the current role. PR runs never get AWS access, by design. |
+| Pipeline: `Not authorized to perform sts:AssumeRoleWithWebIdentity` | The token's `sub` claim doesn't match the role's trust policy. **See the real claim:** `aws cloudtrail lookup-events --lookup-attributes AttributeKey=EventName,AttributeValue=AssumeRoleWithWebIdentity --max-results 1 --query 'Events[0].CloudTrailEvent' --output text \| jq -r .userIdentity.userName`, and compare it with `terraform -chdir=infra/terraform/tooling output github_oidc_subject`. GitHub includes numeric IDs (`repo:OWNER@ID/REPO@ID:ref:refs/heads/main`), which must match `github_owner_id` / `github_repository_id`. Also check: name case, the run is on `main` (PR runs never get AWS access, by design), the OIDC provider exists, and `AWS_ROLE_ARN` is current. |
 | Pipeline: `Could not load credentials` / `id-token` errors | The job lacks `permissions: id-token: write`, or `AWS_ROLE_ARN` / `AWS_REGION` variables are missing. |
 | Deploy job: `Permission to ... denied to github-actions[bot]` / `protected branch` | A branch rule blocks pushes to `main`. Let GitHub Actions bypass it, or see *Pipeline hardening* in What's next. |
 | Pipeline didn't run at all | Only changes under `example-app/` (except `k8s/` and `*.md`) or to the workflow file trigger it, and `[skip ci]` commits never do. Use *Run workflow* (manual trigger) to force a run. |
