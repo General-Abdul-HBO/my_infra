@@ -21,7 +21,7 @@
 
   <properties>
     <java.version>21</java.version>
-    <jacoco.version>0.8.15</jacoco.version>
+    <jacoco.version>0.8.16</jacoco.version>
     <!-- SonarQube Cloud. The organization and project key come from
          sonarcloud.io when you import the repo; .github/workflows/ci-cd.yml
          passes them in (-Dsonar.organization / -Dsonar.projectKey). -->
